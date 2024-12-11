@@ -8,7 +8,7 @@ import (
 )
 
 type BNode struct {
-	data []byte
+	Data []byte
 }
 
 const (
@@ -20,9 +20,9 @@ type BTree struct {
 	// pointer (a nonzero page number)
 	root uint64
 	// callbacks for managing on disk pages
-	get func(uint64) BNode // dereference a pointer
-	new func(BNode) uint64 // allocate a new page
-	del func(uint64)       // deallocate a page
+	Get func(uint64) BNode // dereference a pointer
+	New func(BNode) uint64 // allocate a new page
+	Del func(uint64)       // deallocate a page
 }
 
 const (
@@ -43,84 +43,84 @@ func init() {
 //	helper functions
 //
 // header
-func (node BNode) btype() uint16 {
-	return binary.LittleEndian.Uint16(node.data)
+func (node BNode) Btype() uint16 {
+	return binary.LittleEndian.Uint16(node.Data)
 }
 
-func (node BNode) nkeys() uint16 {
-	return binary.LittleEndian.Uint16(node.data[2:4])
+func (node BNode) Nkeys() uint16 {
+	return binary.LittleEndian.Uint16(node.Data[2:4])
 }
 
-func (node BNode) setHeader(btype uint16, nkeys uint16) {
-	binary.LittleEndian.PutUint16(node.data[0:2], btype)
-	binary.LittleEndian.PutUint16(node.data[2:4], nkeys)
+func (node BNode) SetHeader(btype uint16, nkeys uint16) {
+	binary.LittleEndian.PutUint16(node.Data[0:2], btype)
+	binary.LittleEndian.PutUint16(node.Data[2:4], nkeys)
 }
 
 // pointers
-func (node BNode) getPtr(idx uint16) uint64 {
-	u.Assert(idx < node.nkeys())
+func (node BNode) GetPtr(idx uint16) uint64 {
+	u.Assert(idx < node.Nkeys())
 	pos := HEADER + 8*idx
-	return binary.LittleEndian.Uint64(node.data[pos:])
+	return binary.LittleEndian.Uint64(node.Data[pos:])
 }
 
-func (node BNode) setPtr(idx uint16, val uint64) {
-	u.Assert(idx < node.nkeys())
+func (node BNode) SetPtr(idx uint16, val uint64) {
+	u.Assert(idx < node.Nkeys())
 	pos := HEADER + 8*idx
-	binary.LittleEndian.PutUint64(node.data[pos:], val)
+	binary.LittleEndian.PutUint64(node.Data[pos:], val)
 }
 
 // offset list
-func offsetPos(node BNode, idx uint16) uint16 {
-	u.Assert(1 <= idx && idx <= node.nkeys())
-	return HEADER + 8*node.nkeys() + 2*(idx-1)
+func OffsetPos(node BNode, idx uint16) uint16 {
+	u.Assert(1 <= idx && idx <= node.Nkeys())
+	return HEADER + 8*node.Nkeys() + 2*(idx-1)
 }
 
-func (node BNode) getOffset(idx uint16) uint16 {
+func (node BNode) GetOffset(idx uint16) uint16 {
 	if idx == 0 {
 		return 0
 	}
-	return binary.LittleEndian.Uint16(node.data[offsetPos(node, idx):])
+	return binary.LittleEndian.Uint16(node.Data[OffsetPos(node, idx):])
 }
 
-func (node BNode) setOffset(idx uint16, offset uint16) {
-	binary.LittleEndian.PutUint16(node.data[offsetPos(node, idx):], offset)
+func (node BNode) SetOffset(idx uint16, offset uint16) {
+	binary.LittleEndian.PutUint16(node.Data[OffsetPos(node, idx):], offset)
 }
 
 // key-values
-func (node BNode) kvPos(idx uint16) uint16 {
-	u.Assert(idx <= node.nkeys())
-	return HEADER + 8*node.nkeys() + 2*node.nkeys() + node.getOffset(idx)
+func (node BNode) KvPos(idx uint16) uint16 {
+	u.Assert(idx <= node.Nkeys())
+	return HEADER + 8*node.Nkeys() + 2*node.Nkeys() + node.GetOffset(idx)
 }
 
-func (node BNode) getKey(idx uint16) []byte {
-	u.Assert(idx < node.nkeys())
-	pos := node.kvPos(idx)
-	klen := binary.LittleEndian.Uint16(node.data[pos:])
-	return node.data[pos+4:][:klen]
+func (node BNode) GetKey(idx uint16) []byte {
+	u.Assert(idx < node.Nkeys())
+	pos := node.KvPos(idx)
+	klen := binary.LittleEndian.Uint16(node.Data[pos:])
+	return node.Data[pos+4:][:klen]
 }
 
-func (node BNode) getVal(idx uint16) []byte {
-	u.Assert(idx < node.nkeys())
-	pos := node.kvPos(idx)
-	klen := binary.LittleEndian.Uint16(node.data[pos+0:])
-	vlen := binary.LittleEndian.Uint16(node.data[pos+2:])
-	return node.data[pos+4+klen:][:vlen]
+func (node BNode) GetVal(idx uint16) []byte {
+	u.Assert(idx < node.Nkeys())
+	pos := node.KvPos(idx)
+	klen := binary.LittleEndian.Uint16(node.Data[pos+0:])
+	vlen := binary.LittleEndian.Uint16(node.Data[pos+2:])
+	return node.Data[pos+4+klen:][:vlen]
 }
 
 // node size in bytes
-func (node BNode) nbytes() uint16 {
-	return node.kvPos(node.nkeys())
+func (node BNode) Nbytes() uint16 {
+	return node.KvPos(node.Nkeys())
 }
 
 // returns the first kid node whose range intersects the key. (kid[i] <= key)
 // TODO: bisect
-func nodeLookupLE(node BNode, key []byte) uint16 {
-	nkeys := node.nkeys()
+func NodeLookupLE(node BNode, key []byte) uint16 {
+	nkeys := node.Nkeys()
 	found := uint16(0)
 	// the first key is a copy from the parent node,
 	// thus it's always less than or equal to the key
 	for i := uint16(1); i < nkeys; i++ {
-		cmp := bytes.Compare(node.getKey(i), key)
+		cmp := bytes.Compare(node.GetKey(i), key)
 		if cmp <= 0 {
 			found = i
 		}
@@ -132,167 +132,331 @@ func nodeLookupLE(node BNode, key []byte) uint16 {
 }
 
 // add a new key to a leaf node
-func leafInsert(new BNode, old BNode, idx uint16, key []byte, val []byte) {
-	new.setHeader(BNODE_LEAF, old.nkeys()+1)
-	nodeAppendRange(new, old, 0, 0, idx)
-	nodeAppendKV(new, idx, 0, key, val)
-	nodeAppendRange(new, old, idx+1, idx, old.nkeys() - idx)
+func LeafInsert(new BNode, old BNode, idx uint16, key []byte, val []byte) {
+	new.SetHeader(BNODE_LEAF, old.Nkeys()+1)
+	NodeAppendRange(new, old, 0, 0, idx)
+	NodeAppendKV(new, idx, 0, key, val)
+	NodeAppendRange(new, old, idx+1, idx, old.Nkeys()-idx)
 
 }
+
 // upadete the leaf
-func leafUpadate(new BNode, old BNode, idx uint16, key []byte, val []byte) {
-	new.setHeader(BNODE_LEAF, old.nkeys()+1)
-	nodeAppendRange(new, old, 0, 0, idx)
-	nodeAppendKV(new, idx, 0, key, val)
-	nodeAppendRange(new, old, idx+1, idx, old.nkeys() - idx)
+func LeafUpadate(new BNode, old BNode, idx uint16, key []byte, val []byte) {
+	new.SetHeader(BNODE_LEAF, old.Nkeys()+1)
+	NodeAppendRange(new, old, 0, 0, idx)
+	NodeAppendKV(new, idx, 0, key, val)
+	NodeAppendRange(new, old, idx+1, idx, old.Nkeys()-idx)
 
 }
 
 // copy multiple KVs into the position
-func nodeAppendRange(
+func NodeAppendRange(
 	new BNode, old BNode,
 	dstNew uint16, srcOld uint16, n uint16,
 ) {
-	u.Assert(srcOld+n <= old.nkeys())
-	u.Assert(dstNew+n <= new.nkeys())
+	u.Assert(srcOld+n <= old.Nkeys())
+	u.Assert(dstNew+n <= new.Nkeys())
 	if n == 0 {
 		return
 	}
 
 	// pointers
 	for i := uint16(0); i < n; i++ {
-		new.setPtr(dstNew+i, old.getPtr(srcOld+i))
+		new.SetPtr(dstNew+i, old.GetPtr(srcOld+i))
 	}
 
 	// ofsets
-	dstBegin := new.getOffset(dstNew)
-	srcBegin := old.getOffset(srcOld)
+	dstBegin := new.GetOffset(dstNew)
+	srcBegin := old.GetOffset(srcOld)
 	for i := uint16(1); i <= n; i++ { // NOTE: the range is [1, n]
-		offset := dstBegin + old.getOffset(srcOld+i) - srcBegin
-		new.setOffset(dstNew+i, offset)
+		offset := dstBegin + old.GetOffset(srcOld+i) - srcBegin
+		new.SetOffset(dstNew+i, offset)
 	}
 
 	// KVs
-	begin := old.kvPos(srcOld)
-	end := old.kvPos(srcOld + n)
-	copy(new.data[new.kvPos(dstNew):], old.data[begin:end])
+	begin := old.KvPos(srcOld)
+	end := old.KvPos(srcOld + n)
+	copy(new.Data[new.KvPos(dstNew):], old.Data[begin:end])
 }
 
 // copy a KV into the position
-func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
+func NodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
 	// ptrs
-	new.setPtr(idx, ptr)
+	new.SetPtr(idx, ptr)
 	// KVs
-	pos := new.kvPos(idx)
-	binary.LittleEndian.PutUint16(new.data[pos+0:], uint16(len(key)))
-	binary.LittleEndian.PutUint16(new.data[pos+2:], uint16(len(val)))
-	copy(new.data[pos+4:], key)
-	copy(new.data[pos+4+uint16(len(key)):], val)
+	pos := new.KvPos(idx)
+	binary.LittleEndian.PutUint16(new.Data[pos+0:], uint16(len(key)))
+	binary.LittleEndian.PutUint16(new.Data[pos+2:], uint16(len(val)))
+	copy(new.Data[pos+4:], key)
+	copy(new.Data[pos+4+uint16(len(key)):], val)
 	// the offset of the next key
-	new.setOffset(idx+1, new.getOffset(idx)+4+uint16((len(key)+len(val))))
+	new.SetOffset(idx+1, new.GetOffset(idx)+4+uint16((len(key)+len(val))))
 }
 
 // insert a KV into a node, the result might be split into 2 nodes.
 // the caller is responsible for deallocating the input node
 // and splitting and allocating result nodes.
-func treeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
+func TreeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
 	// the result node.
 	// it's allowed to be bigger than 1 page and will be split if so
 	new := BNode{
-		data: make([]byte, 2*BTREE_PAGE_SIZE),
+		Data: make([]byte, 2*BTREE_PAGE_SIZE),
 	}
-    
+
 	// where to insert the key?
-	idx := nodeLookupLE(node, key)
+	idx := NodeLookupLE(node, key)
 	// act depending on the node type
-	switch node.btype() {
+	switch node.Btype() {
 	case BNODE_LEAF:
 		// leaf, node.getKey(idx) <= key
-		if bytes.Equal(key, node.getKey(idx)) {
+		if bytes.Equal(key, node.GetKey(idx)) {
 			// found the key, upadate it.
-            leafUpadate(new, node, idx, key, val)
+			LeafUpadate(new, node, idx, key, val)
 		} else {
 			// insert it after the position.
-			leafInsert(new, node, idx+1, key, val)
+			LeafInsert(new, node, idx+1, key, val)
 		}
 	case BNODE_NODE:
 		// internal node, insert it to a kid node.
-		nodeInsert(tree, new, node, idx, key, val)
+		NodeInsert(tree, new, node, idx, key, val)
 	default:
 		panic("bad node!")
 	}
 	return new
 }
 
-func nodeInsert(
+func NodeInsert(
 	tree *BTree, new BNode,
 	node BNode, idx uint16,
 	key []byte, val []byte,
 ) {
 	// get and deallocate the kid node
-	kptr := node.getPtr(idx)
-	knode := tree.get(kptr)
-	tree.del(kptr)
+	kptr := node.GetPtr(idx)
+	knode := tree.Get(kptr)
+	tree.Del(kptr)
 	// recursive insertion to the kid node
-	knode = treeInsert(tree, knode, key, val)
+	knode = TreeInsert(tree, knode, key, val)
 	// split the result
-	nsplit, splited := nodeSplit3(knode)
+	nsplit, splited := NodeSplit3(knode)
 	// update the kid links
-	nodeReplaceKidN(tree, new, node, idx, splited[:nsplit]...) 
+	NodeReplaceKidN(tree, new, node, idx, splited[:nsplit]...)
 }
 
 // split a bigger-than-allowed node into two.
 // the second node always fits on a page.
-func nodeSplit2(left BNode, right BNode, old BNode) {
-	 // Calculate the midpoint of the old node's data
-	 mid := len(old.data) / 2
+func NodeSplit2(left BNode, right BNode, old BNode) {
+	// Calculate the midpoint of the old node's data
+	mid := len(old.Data) / 2
 
-	 // Copy the left half of the old node's data into the left node
-	 copy(left.data, old.data[:mid])
- 
-	 // Copy the right half of the old node's data into the right node
-	 copy(right.data, old.data[mid:])
- 
-	 // Trim excess data in both left and right nodes
-	 left.data = left.data[:mid]
-	 right.data = right.data[:len(old.data)-mid]
- 
-	 u.Assert(len(left.data) <= len(left.data))
+	// Copy the left half of the old node's data into the left node
+	copy(left.Data, old.Data[:mid])
+
+	// Copy the right half of the old node's data into the right node
+	copy(right.Data, old.Data[mid:])
+
+	// Trim excess data in both left and right nodes
+	left.Data = left.Data[:mid]
+	right.Data = right.Data[:len(old.Data)-mid]
+
+	u.Assert(len(left.Data) <= len(left.Data))
 }
 
 // split a node if it's too big. the result are 1-3 nodes.
-func nodeSplit3(old BNode) (uint16, [3]BNode) {
-	if old.nbytes() <= BTREE_PAGE_SIZE {
-		old.data = old.data[:BTREE_PAGE_SIZE]
+func NodeSplit3(old BNode) (uint16, [3]BNode) {
+	if old.Nbytes() <= BTREE_PAGE_SIZE {
+		old.Data = old.Data[:BTREE_PAGE_SIZE]
 		return 1, [3]BNode{old}
 	}
 	left := BNode{make([]byte, 2*BTREE_PAGE_SIZE)} // might be split later
 	right := BNode{make([]byte, BTREE_PAGE_SIZE)}
-	nodeSplit2(left, right, old)
-	if left.btype() <= BTREE_PAGE_SIZE {
-		left.data = left.data[:BTREE_PAGE_SIZE]
+	NodeSplit2(left, right, old)
+	if left.Btype() <= BTREE_PAGE_SIZE {
+		left.Data = left.Data[:BTREE_PAGE_SIZE]
 		return 2, [3]BNode{left, right}
 	}
 	// left node is still too large
-	leftleft := BNode{make([]byte, BTREE_PAGE_SIZE)} 
+	leftleft := BNode{make([]byte, BTREE_PAGE_SIZE)}
 	middle := BNode{make([]byte, BTREE_PAGE_SIZE)}
-	nodeSplit2(leftleft, middle, left)
-	u.Assert(leftleft.nbytes() <= BTREE_PAGE_SIZE)
-	return 3, [3]BNode{leftleft, middle, right} 
+	NodeSplit2(leftleft, middle, left)
+	u.Assert(leftleft.Nbytes() <= BTREE_PAGE_SIZE)
+	return 3, [3]BNode{leftleft, middle, right}
 }
 
 // replace a link with multiple links
-func nodeReplaceKidN(
+func NodeReplaceKidN(
 	tree *BTree, new BNode, old BNode,
 	idx uint16, kids ...BNode,
 ) {
 	inc := uint16(len(kids))
-	new.setHeader(BNODE_NODE, old.nkeys()+inc-1)
-	nodeAppendRange(new, old, 0, 0, idx)
+	new.SetHeader(BNODE_NODE, old.Nkeys()+inc-1)
+	NodeAppendRange(new, old, 0, 0, idx)
 	for i, node := range kids {
-       nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil)
+		NodeAppendKV(new, idx+uint16(i), tree.New(node), node.GetKey(0), nil)
 	}
-	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))		
+	NodeAppendRange(new, old, idx+inc, idx+1, old.Nkeys()-(idx+1))
 }
 
 // remove a key from a leaf node
+func LeafDelete(new BNode, old BNode, idx uint16) {
+	new.SetHeader(BNODE_LEAF, old.Nkeys()-1)
+	NodeAppendRange(new, old, 0, 0, idx)
+	NodeAppendRange(new, old, idx, idx+1, old.Nkeys()-(idx+1))
+}
+
+// delete a key from the tree
+func TreeDelete(tree *BTree, node BNode, key []byte) BNode {
+	// where to find the key?
+	idx := NodeLookupLE(node, key)
+	// act depending on the node type
+	switch node.Btype() {
+	case BNODE_LEAF:
+		if !bytes.Equal(key, node.GetKey(idx)) {
+			return BNode{} // not found
+		}
+		// delete the key in the leaf
+		new := BNode{Data: make([]byte, BTREE_PAGE_SIZE)}
+		LeafDelete(new, node, idx)
+		return new
+	case BNODE_NODE:
+		return NodeDelete(tree, node, idx, key)
+	default:
+		panic("bad node!")
+	}
+}
+
+// part of the treeDelete() function
+func NodeDelete(tree *BTree, node BNode, idx uint16, key []byte) BNode {
+	// recurse into the kid
+	kptr := node.GetPtr(idx)
+	updated := TreeDelete(tree, tree.Get(kptr), key)
+	if len(updated.Data) == 0 {
+		return BNode{} // not found
+	}
+	tree.Del(kptr)
+
+	new := BNode{Data: make([]byte, BTREE_PAGE_SIZE)}
+	// check for merging
+	mergeDir, sibling := ShouldMerge(tree, node, idx, updated)
+	switch {
+	case mergeDir < 0: // left
+		merged := BNode{Data: make([]byte, BTREE_PAGE_SIZE)}
+		NodeMerge(merged, sibling, updated)
+		tree.Del(node.GetPtr(idx - 1))
+		NodeReplace2Kid(new, node, idx-1, tree.New(merged), merged.GetKey(0))
+	case mergeDir > 0: // right
+		merged := BNode{Data: make([]byte, BTREE_PAGE_SIZE)}
+		NodeMerge(merged, updated, sibling)
+		tree.Del(node.GetPtr(idx + 1))
+		NodeReplace2Kid(new, node, idx, tree.New(merged), merged.GetKey(0))
+	case mergeDir == 0:
+		u.Assert(updated.Nkeys() > 0)
+		NodeReplaceKidN(tree, new, node, idx, updated)
+	}
+	return new
+}
+
+// should the updated kid be merged with a sibling?
+func ShouldMerge(
+	tree *BTree, node BNode,
+	idx uint16, updated BNode,
+) (int, BNode) {
+	if updated.Nbytes() > BTREE_PAGE_SIZE/4 {
+		return 0, BNode{}
+	}
+	if idx > 0 {
+		sibling := tree.Get(node.GetPtr(idx - 1))
+		merged := sibling.Nbytes() + updated.Nbytes() - HEADER
+		if merged <= BTREE_PAGE_SIZE {
+			return -1, sibling
+		}
+	}
+	if idx+1 < node.Nkeys() {
+		sibling := tree.Get(node.GetPtr(idx + 1))
+		merged := sibling.Nbytes() + updated.Nbytes() - HEADER
+		if merged <= BTREE_PAGE_SIZE {
+			return +1, sibling
+		}
+	}
+	return 0, BNode{}
+}
+
+// merge 2 nodes into 1
+func NodeMerge(new BNode, left BNode, right BNode) {
+	new.SetHeader(left.Btype(), left.Nkeys()+right.Nkeys())
+	NodeAppendRange(new, left, 0, 0, left.Nkeys())
+	NodeAppendRange(new, right, left.Nkeys(), 0, right.Nkeys())
+}
+
+// The NodeReplace2Kid function replaces two children of a node with a single child during a merge operation.
+func NodeReplace2Kid(new BNode, parentNode BNode, idx uint16, val uint64, key []byte) {
+	// Create a temporary child node for the merged key and pointer
+	tempChild := BNode{Data: make([]byte, BTREE_PAGE_SIZE)}
+	tempChild.SetHeader(BNODE_LEAF, 1) // Assuming it's a single key node
+
+	// Directly set the key and pointer in the tempChild node
+	copy(tempChild.Data[:len(key)], key) // Copy the key to the start of the data
+	tempChild.SetPtr(0, val)             // Set the pointer for the child node
+
+	// Update the tempChild's metadata if necessary (e.g., byte size, nkeys)
+	// Ensure any header fields are consistent with your implementation.
+
+	// Use nodeReplaceKidN to replace the two child nodes with the new merged child
+	NodeReplaceKidN(nil, new, parentNode, idx, tempChild)
+}
+
+// root node
+func (tree *BTree) Delete(key []byte) bool {
+	u.Assert(len(key) != 0)
+	u.Assert(len(key) <= BTREE_MAX_KEY_SIZE)
+	if tree.root == 0 {
+		return false
+	}
+	updated := TreeDelete(tree, tree.Get(tree.root), key)
+	if len(updated.Data) == 0 {
+		return false // not found
+	}
+	tree.Del(tree.root)
+	if updated.Btype() == BNODE_NODE && updated.Nkeys() == 1 {
+		// remove a level
+		tree.root = updated.GetPtr(0)
+	} else {
+		tree.root = tree.New(updated)
+	}
+	return true
+}
+
+// the final interface for insertion
+func (tree *BTree) Insert(key []byte, val []byte) {
+	u.Assert(len(key) != 0)
+	u.Assert(len(key) <= BTREE_MAX_KEY_SIZE)
+	u.Assert(len(val) <= BTREE_MAX_VAL_SIZE)
+	if tree.root == 0 {
+		// create the first node
+		root := BNode{Data: make([]byte, BTREE_PAGE_SIZE)}
+		root.SetHeader(BNODE_LEAF, 2)
+		// a dummy key, this makes the tree cover the whole key space.
+		// thus a lookup can always find a containing node.
+		NodeAppendKV(root, 0, 0, nil, nil)
+		NodeAppendKV(root, 1, 0, key, val)
+		tree.root = tree.New(root)
+		return
+	}
+	node := tree.Get(tree.root)
+	tree.Del(tree.root)
+	node = TreeInsert(tree, node, key, val)
+	nsplit, splitted := NodeSplit3(node)
+	if nsplit > 1 {
+		// the root was split, add a new level.
+		root := BNode{Data: make([]byte, BTREE_PAGE_SIZE)}
+		root.SetHeader(BNODE_NODE, nsplit)
+		for i, knode := range splitted[:nsplit] {
+			ptr, key := tree.New(knode), knode.GetKey(0)
+			NodeAppendKV(root, uint16(i), ptr, key, nil)
+		}
+		tree.root = tree.New(root)
+	} else {
+		tree.root = tree.New(splitted[0])
+	}
+}
+
+
