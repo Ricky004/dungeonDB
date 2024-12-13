@@ -82,3 +82,188 @@ func MmapInitWindows(fp *os.File) (int, []byte, error) {
 	return int(fi.Size()), (*[1 << 30]byte)(unsafe.Pointer(addr))[:fi.Size()], nil
 
 }
+
+func ExtendMmapWindows(db *KV, npages int) error {
+	// Check if the current memory-mapped region is already large enough
+	if db.mmap.total >= npages*BTREE_PAGE_SIZE {
+		return nil
+	}
+
+	// Double the address space size
+	newSize := db.mmap.total * 2
+
+	// Open the file again, as we may need to extend the file mapping
+	handle, err := windows.CreateFile(
+		windows.StringToUTF16Ptr(db.fp.Name()),
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		0,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("CreateFile: %s", err)
+	}
+	defer windows.CloseHandle(handle)
+
+	// Create a new file mapping for the extended size
+	mapHandle, err := windows.CreateFileMapping(
+		handle,
+		nil,
+		windows.PAGE_READWRITE,
+		0,
+		uint32(newSize),
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("CreateFileMapping: %s", err)
+	}
+	defer windows.CloseHandle(mapHandle)
+
+	// Map the extended region of the file into memory
+	addr, err := windows.MapViewOfFile(
+		mapHandle,
+		windows.FILE_MAP_READ|windows.FILE_MAP_WRITE,
+		0,
+		0,
+		uintptr(newSize),
+	)
+	if err != nil {
+		return fmt.Errorf("MapViewOfFile: %s", err)
+	}
+
+	// Update the KV struct with the new memory mapping information
+	db.mmap.total = newSize
+	// Append the new chunk (the extended region) to the mmap chunks
+	chunk := (*[1 << 30]byte)(unsafe.Pointer(addr))[:newSize]
+	db.mmap.chunks = append(db.mmap.chunks, chunk)
+
+	return nil
+}
+
+
+func extendFileWindows(db *KV, npages int) error {
+	// Calculate the number of pages already in the file
+	filePages := db.mmap.file / BTREE_PAGE_SIZE
+	if filePages >= npages {
+		return nil
+	}
+
+	// Increase the file size exponentially, similar to the original logic
+	for filePages < npages {
+		inc := filePages / 8
+		if inc < 1 {
+			inc = 1
+		}
+		filePages += inc
+	}
+
+	// Calculate the new file size
+	fileSize := filePages * BTREE_PAGE_SIZE
+
+	// Open the file for resizing
+	handle, err := windows.CreateFile(
+		windows.StringToUTF16Ptr(db.fp.Name()),
+		windows.GENERIC_WRITE,
+		0,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		return fmt.Errorf("CreateFile: %s", err)
+	}
+	defer windows.CloseHandle(handle)
+
+	// Set the file pointer to the new file size
+	_, err = windows.SetFilePointer(handle, int32(fileSize), nil, windows.FILE_BEGIN)
+	if err != nil {
+		return fmt.Errorf("SetFilePointer: %s", err)
+	}
+
+	// Extend the file by setting the end of the file at the new position
+	err = windows.SetEndOfFile(handle)
+	if err != nil {
+		return fmt.Errorf("SetEndOfFile: %s", err)
+	}
+
+	// Update the file size in the KV struct
+	db.mmap.file = fileSize
+	return nil
+}
+
+
+// Open opens the DB file and sets up the memory-mapping
+func (db *KV) OpenWindows() error {
+	// Open or create the DB file using CreateFile (Windows)
+	handle, err := windows.CreateFile(
+		windows.StringToUTF16Ptr(db.Path),
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		0,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		// If the file does not exist, we need to create it
+		if err.Error() == "The system cannot find the file specified." {
+			handle, err = windows.CreateFile(
+				windows.StringToUTF16Ptr(db.Path),
+				windows.GENERIC_READ|windows.GENERIC_WRITE,
+				0,
+				nil,
+				windows.CREATE_NEW,
+				windows.FILE_ATTRIBUTE_NORMAL,
+				0,
+			)
+			if err != nil {
+				return fmt.Errorf("CreateFile: %w", err)
+			}
+		} else {
+			return fmt.Errorf("CreateFile: %w", err)
+		}
+	}
+	defer windows.CloseHandle(handle)
+
+	// Create the initial mmap (memory map) using MapViewOfFile
+	sz, chunk, err := MmapInitWindows(db.fp)
+	if err != nil {
+		goto fail
+	}
+	db.mmap.file = sz
+	db.mmap.total = len(chunk)
+	db.mmap.chunks = [][]byte{chunk}
+
+	// Set up BTree callbacks
+	db.tree.Get = db.pageGet
+	db.tree.New = db.pageNew
+	db.tree.Del = db.pageDel
+
+	// Read the master page
+	err = masterLoad(db)
+	if err != nil {
+		goto fail
+	}
+
+	// Done
+	return nil
+
+fail:
+	// Cleanup on failure
+	db.CloseWindows()
+	return fmt.Errorf("KV.Open: %w", err)
+}
+
+// Close performs cleanup of the memory-mapped regions and closes the file
+func (db *KV) CloseWindows() {
+	for _, chunk := range db.mmap.chunks {
+		// Unmap the chunk using UnmapViewOfFile
+		err := windows.UnmapViewOfFile(uintptr(unsafe.Pointer(&chunk[0])))
+		u.Assert(err == nil)
+	}
+	_ = db.fp.Close()
+}
+
