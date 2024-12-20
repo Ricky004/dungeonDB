@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"encoding/binary"
+
 	u "github.com/Ricky004/dungeonDB/internal/utils"
 )
 
@@ -80,20 +82,68 @@ func (fl *FreeList) Update(popn int, freed []uint64) {
 
 func flPush(fl *FreeList, freed []uint64, reuse []uint64) {
 	// code
+	for len(freed) > 0 {
+		new := BNode{make([]byte, BTREE_PAGE_SIZE)}
+
+		// construct the new node
+		size := len(freed)
+		if size > FREE_LIST_CAP {
+			size = FREE_LIST_CAP
+		}
+		flnSetHeader(new, uint16(size), fl.head)
+		for i, ptr := range freed[:size] {
+			flnSetPtr(new, i, ptr)
+		}
+		freed = freed[size:]
+
+		if len(reuse) > 0 {
+			// reuse a pointer from the free list
+			fl.head, reuse = reuse[0], reuse[1:]
+			fl.use(fl.head, new)
+		} else {
+			// or append a page to house the new node
+			fl.head = fl.new(new)
+		}
+	}
+	u.Assert(len(reuse) == 0)
 }
 
+// Returns the size stored in the first 2 bytes of the node's Data
 func flnSize(node BNode) int {
-	return 0
+    u.Assert(len(node.Data) >= 2, "BNode data too small for flnSize")
+    return int(binary.LittleEndian.Uint16(node.Data[:2]))
 }
 
+// Returns the next pointer stored in bytes 2 to 10 of the node's Data
 func flnNext(node BNode) uint64 {
-	return 0
+    u.Assert(len(node.Data) >= 10, "BNode data too small for flnNext")
+    return binary.LittleEndian.Uint64(node.Data[2:10])
 }
 
+// Returns the pointer at index idx from the node's Data
 func flnPtr(node BNode, idx int) uint64 {
-	return 0
+    start := 10 + idx*8
+    u.Assert(len(node.Data) >= start+8, "BNode data too small for flnPtr")
+    return binary.LittleEndian.Uint64(node.Data[start : start+8])
 }
 
+// Sets the total number of free list items in bytes 10 to 18
 func flnSetTotal(node BNode, total uint64) {
-	// code
+    u.Assert(len(node.Data) >= 18, "BNode data too small for flnSetTotal")
+    binary.LittleEndian.PutUint64(node.Data[10:18], total)
 }
+
+// Sets the pointer at index idx in the node's Data
+func flnSetPtr(node BNode, idx int, ptr uint64) {
+    start := 10 + idx*8
+    u.Assert(len(node.Data) >= start+8, "BNode data too small for flnSetPtr")
+    binary.LittleEndian.PutUint64(node.Data[start:start+8], ptr)
+}
+
+// Sets the header with size and next pointer
+func flnSetHeader(node BNode, size uint16, next uint64) {
+    u.Assert(len(node.Data) >= 10, "BNode data too small for flnSetHeader")
+    binary.LittleEndian.PutUint16(node.Data[:2], size)
+    binary.LittleEndian.PutUint64(node.Data[2:10], next)
+}
+

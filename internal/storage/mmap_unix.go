@@ -87,7 +87,6 @@ func extendFile(db *KV, npages int) error {
 	return nil
 }
 
-
 func (db *KV) Open() error {
 	// open or create the DB file
 	fp, err := os.OpenFile(db.Path, os.O_RDWR|os.O_CREATE, 0644)
@@ -104,11 +103,11 @@ func (db *KV) Open() error {
 	db.mmap.total = len(chunk)
 	db.mmap.chunks = [][]byte{chunk}
 	// btree callbacks
-	db.tree.Get = db.pageGet
-	db.tree.New = db.pageNew
-	db.tree.Del = db.pageDel
+	db.tree.Get = db.PageGet
+	db.tree.New = db.PageNew
+	db.tree.Del = db.PageDel
 	// read the master page
-	err = masterLoad(db)
+	err = MasterLoad(db)
 	if err != nil {
 		goto fail
 	}
@@ -152,35 +151,46 @@ func FlushPages(db *KV) error {
 }
 
 func WritePages(db *KV) error {
+	// update the free list
+	freed := []uint64{}
+	for ptr, page := range db.page.updates {
+		if page == nil {
+			freed = append(freed, ptr)
+		}
+	}
+	db.free.Update(db.page.nfree, freed)
+
 	// extend the file & mmap if needed
-	npages := int(db.page.flushed) + len(db.page.temp)
+	npages := int(db.page.flushed) + len(db.page.updates)
 	if err := extendFile(db, npages); err != nil {
 		return err
 	}
 	if err := ExtendMmap(db, npages); err != nil {
 		return err
 	}
-	// copy data to the file
-	for i, page := range db.page.temp {
-		ptr := db.page.flushed + uint64(i)
-		copy(db.pageGet(ptr).Data, page)
+	
+	// copy pages to the file
+	for ptr, page := range db.page.updates {
+		if page != nil {
+		copy(PageGetMapped(db, ptr).Data, page)
+		}
 	}
 	return nil
 }
 
 func SyncPages(db *KV) error {
-	// flush data to the disk. must be done before updating the master page.
-	if err := db.fp.Sync(); err != nil {
-		return fmt.Errorf("fsync: %w", err)
-	}
-	db.page.flushed += uint64(len(db.page.temp))
-	db.page.temp = db.page.temp[:0]
-	// update & flush the master page
-	if err := masterStore(db); err != nil {
-		return err
-	}
-	if err := db.fp.Sync(); err != nil {
-		return fmt.Errorf("fsync: %w", err)
-	}
-	return nil
+    // flush data to the disk. must be done before updating the master page.
+    if err := db.fp.Sync(); err != nil {
+        return fmt.Errorf("fsync: %w", err)
+    }
+    db.page.flushed += uint64(len(db.page.updates))
+    db.page.updates = make(map[uint64][]byte)
+    // update & flush the master page
+    if err := MasterStore(db); err != nil {
+        return err
+    }
+    if err := db.fp.Sync(); err != nil {
+        return fmt.Errorf("fsync: %w", err)
+    }
+    return nil
 }
