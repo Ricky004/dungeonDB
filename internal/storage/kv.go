@@ -93,9 +93,7 @@ func (db *KV) pageNew(node BNode) uint64 {
 }
 
 // callback for BTree, deallocate a page.
-// callback for BTree, deallocate a page.
 func (db *KV) pageDel(ptr uint64) {
 	// code
 }
-
 
