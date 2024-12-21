@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/Ricky004/dungeonDB/internal/storage"
+	u "github.com/Ricky004/dungeonDB/internal/utils"
 )
 
 func main() {
@@ -28,17 +29,17 @@ func main() {
 		log.Fatalf("Failed to open the database: %v", err)
 	}
 	defer func() {
-        if err := db.CloseWindows(); err != nil {
-            log.Printf("Error closing database: %v", err)
-        }
-    }() // Ensure cleanup happens even if something fails
+		if err := db.CloseWindows(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}() // Ensure cleanup happens even if something fails
 
 	fmt.Println("Database opened successfully!")
 
 	// Perform some basic operations (e.g., adding a page, deleting a page)
 	// Create a new BNode (sample data)
 	node := storage.BNode{
-		Data: []byte("This is my DB node!"),
+		Data: []byte(`work in progress`),
 	}
 
 	// Allocate a new page
@@ -46,8 +47,8 @@ func main() {
 	fmt.Printf("Added a new page with ID: %d\n", pageID)
 
 	// Delete the page
-	db.PageDel(pageID)
-	fmt.Printf("Deleted the page with ID: %d\n", pageID)
+	// db.PageDel(pageID)
+	// fmt.Printf("Deleted the page with ID: %d\n", pageID)
 
 	// Verify master page load/store
 	err = storage.MasterStore(db)
@@ -57,6 +58,12 @@ func main() {
 	fmt.Println("Master page stored successfully!")
 
 	fmt.Println("All operations completed successfully!")
+
+	file, err := os.Open(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database file: %v", err)
+	}
+	defer file.Close()
+
+	u.HexViewr(file, 4096, 64)
 }
-
-

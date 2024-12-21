@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"os"
 
 	u "github.com/Ricky004/dungeonDB/internal/utils"
@@ -232,11 +233,49 @@ func (db *KV) PageDel(ptr uint64) {
 
 // callback for FreeList, allocate a new page
 func (db *KV) PageAppend(node BNode) uint64 {
-	u.Assert(len(node.Data) <= BTREE_PAGE_SIZE)
-	ptr := db.page.flushed + uint64(db.page.nappend)
-	db.page.nappend++
-	db.page.updates[ptr] = node.Data
-	return ptr
+    u.Assert(len(node.Data) <= BTREE_PAGE_SIZE)
+    ptr := db.page.flushed + uint64(db.page.nappend)
+    db.page.nappend++
+
+    // Update in-memory page map
+    db.page.updates[ptr] = node.Data
+
+    // Calculate offset
+    offset := ptr * BTREE_PAGE_SIZE
+    log.Printf("Writing node data to file at offset: %d", offset)
+
+    // Write to the database file
+    _, err := db.fp.WriteAt(node.Data, int64(offset))
+    if err != nil {
+        log.Fatalf("Failed to write node data to file: %v", err)
+    } else {
+        log.Printf("Node data written successfully at offset: %d", offset)
+    }
+
+    // Sync file to persist changes
+    err = db.fp.Sync()
+    if err != nil {
+        log.Fatalf("Failed to sync file: %v", err)
+    } else {
+        log.Println("File synced successfully.")
+    }
+
+    // Verify file size
+    info, err := db.fp.Stat()
+    if err != nil {
+        log.Fatalf("Failed to stat file: %v", err)
+    }
+    log.Printf("File size after write: %d bytes", info.Size())
+
+    // Read back data for verification
+    data := make([]byte, BTREE_PAGE_SIZE)
+    _, err = db.fp.ReadAt(data, int64(offset))
+    if err != nil {
+        log.Fatalf("Failed to read back data: %v", err)
+    }
+    log.Printf("Read back data at offset %d: %s", offset, string(data))
+
+    return ptr
 }
 
 // callback for FreeList, reuse a page
