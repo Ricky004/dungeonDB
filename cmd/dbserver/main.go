@@ -39,7 +39,7 @@ func main() {
 	// Perform some basic operations (e.g., adding a page, deleting a page)
 	// Create a new BNode (sample data)
 	node := storage.BNode{
-		Data: []byte(`work in progress`),
+		Data: []byte(`work in progress by Ricky004`),
 	}
 
 	// Allocate a new page
@@ -49,6 +49,7 @@ func main() {
 	// Delete the page
 	// db.PageDel(pageID)
 	// fmt.Printf("Deleted the page with ID: %d\n", pageID)
+	db.PageUse(pageID, node)
 
 	// Verify master page load/store
 	err = storage.MasterStore(db)
