@@ -27,14 +27,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to open the database: %v", err)
 	}
-	defer db.CloseWindows() // Ensure cleanup happens even if something fails
+	defer func() {
+        if err := db.CloseWindows(); err != nil {
+            log.Printf("Error closing database: %v", err)
+        }
+    }() // Ensure cleanup happens even if something fails
 
 	fmt.Println("Database opened successfully!")
 
 	// Perform some basic operations (e.g., adding a page, deleting a page)
 	// Create a new BNode (sample data)
 	node := storage.BNode{
-		Data: []byte("Sample data for the BTree node."),
+		Data: []byte("This is my DB node!"),
 	}
 
 	// Allocate a new page

@@ -8,13 +8,13 @@ import (
 	"os"
 	"unsafe"
 
-	u "github.com/Ricky004/dungeonDB/internal/utils"
 	"golang.org/x/sys/windows"
 )
 
 // create the initial mmap that covers the whole file
 // windows specific code for mmap
 func MmapInitWindows(fp *os.File) (int, []byte, error) {
+	// Truncate file if necessary
 	fi, err := fp.Stat()
 	if err != nil {
 		return 0, nil, fmt.Errorf("stat: %w", err)
@@ -22,29 +22,25 @@ func MmapInitWindows(fp *os.File) (int, []byte, error) {
 
 	fileSize := fi.Size()
 	if fileSize%BTREE_PAGE_SIZE != 0 {
-		// Pad file size to the nearest multiple of BTREE_PAGE_SIZE
 		fileSize = (fileSize/BTREE_PAGE_SIZE + 1) * BTREE_PAGE_SIZE
 		if err := fp.Truncate(fileSize); err != nil {
 			return 0, nil, fmt.Errorf("truncate: %w", err)
 		}
 	}
 
-	// Open the file with Windows-specific API
-	handle, err := windows.CreateFile(
-		windows.StringToUTF16Ptr(fp.Name()),
-		windows.GENERIC_READ|windows.GENERIC_WRITE,
-		0,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
-	if err != nil {
-		return 0, nil, fmt.Errorf("CreateFile: %w", err)
-	}
-	defer windows.CloseHandle(handle)
+	// Close and reopen the file
+	fileName := fp.Name()
+	fp.Close()
 
-	// Create a file mapping
+	fp, err = os.OpenFile(fileName, os.O_RDWR, 0644)
+	if err != nil {
+		return 0, nil, fmt.Errorf("reopen file: %w", err)
+	}
+	defer fp.Close()
+
+	handle := windows.Handle(fp.Fd())
+
+	// Create file mapping
 	mapHandle, err := windows.CreateFileMapping(
 		handle,
 		nil,
@@ -70,31 +66,18 @@ func MmapInitWindows(fp *os.File) (int, []byte, error) {
 		return 0, nil, fmt.Errorf("MapViewOfFile: %w", err)
 	}
 
-	// Return the mapped memory as a byte slice
 	return int(fileSize), unsafe.Slice((*byte)(unsafe.Pointer(addr)), fileSize), nil
 }
 
 func ExtendMmapWindows(db *KV, npages int) error {
 	newSize := db.mmap.total + (npages * BTREE_PAGE_SIZE)
 
-	// Open the file
-	handle, err := windows.CreateFile(
-		windows.StringToUTF16Ptr(db.fp.Name()),
-		windows.GENERIC_READ|windows.GENERIC_WRITE,
-		0,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
-	if err != nil {
-		return fmt.Errorf("CreateFile: %w", err)
-	}
-	defer windows.CloseHandle(handle)
+	// Use the existing file handle (db.fp) instead of reopening the file
+	handle := db.fp.Fd()
 
 	// Create a file mapping for the new size
 	mapHandle, err := windows.CreateFileMapping(
-		handle,
+		windows.Handle(handle),
 		nil,
 		windows.PAGE_READWRITE,
 		0,
@@ -145,31 +128,9 @@ func extendFileWindows(db *KV, npages int) error {
 	// Calculate the new file size
 	fileSize := filePages * BTREE_PAGE_SIZE
 
-	// Open the file for resizing
-	handle, err := windows.CreateFile(
-		windows.StringToUTF16Ptr(db.fp.Name()),
-		windows.GENERIC_WRITE,
-		0,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
-	if err != nil {
-		return fmt.Errorf("CreateFile: %s", err)
-	}
-	defer windows.CloseHandle(handle)
-
-	// Set the file pointer to the new file size
-	_, err = windows.SetFilePointer(handle, int32(fileSize), nil, windows.FILE_BEGIN)
-	if err != nil {
-		return fmt.Errorf("SetFilePointer: %s", err)
-	}
-
-	// Extend the file by setting the end of the file at the new position
-	err = windows.SetEndOfFile(handle)
-	if err != nil {
-		return fmt.Errorf("SetEndOfFile: %s", err)
+	// Use the existing file handle to resize the file
+	if err := db.fp.Truncate(int64(fileSize)); err != nil {
+		return fmt.Errorf("failed to truncate file: %w", err)
 	}
 
 	// Update the file size in the KV struct
@@ -181,40 +142,50 @@ func extendFileWindows(db *KV, npages int) error {
 func (db *KV) OpenWindows() error {
 	fmt.Println("Starting OpenWindows...")
 
-	// Validate the database path
 	if db.Path == "" {
 		return fmt.Errorf("database path is empty")
 	}
 	fmt.Printf("Opening database file at path: %q\n", db.Path)
 
-	// Open or create the DB file using os.OpenFile (to get *os.File)
+	// Open or create the file
 	file, err := os.OpenFile(db.Path, os.O_RDWR|os.O_CREATE, 0666)
 	if err != nil {
 		return fmt.Errorf("failed to open or create file: %w", err)
 	}
-	defer file.Close()
+	db.fp = file // Assign file pointer to KV struct
+	fmt.Println("File pointer assigned:", db.fp)
 
 	fmt.Println("File opened successfully.")
 
-	   // Check if the file is already mapped or being used
-    // This check ensures no other processes or parts of your program hold the file handle
-    fileInfo, err := file.Stat()
-    if err != nil {
-        return fmt.Errorf("failed to stat file: %w", err)
-    }
-    fmt.Printf("File size: %d bytes\n", fileInfo.Size())
-
-	// Initialize mmap using the *os.File handle
-	fmt.Println("Initializing memory map...")
-	sz, chunk, err := MmapInitWindows(file)
+	// Check if the file is empty and initialize the signature if needed
+	fileInfo, err := file.Stat()
 	if err != nil {
-        fmt.Printf("Failed to initialize mmap: %v\n", err)
-        return fmt.Errorf("KV.OpenWindows: %w", err)
-    }
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+	fmt.Printf("File size before any operations: %d\n", fileInfo.Size())
 
-	db.mmap.file = sz
-	db.mmap.total = len(chunk)
-	db.mmap.chunks = [][]byte{chunk}
+	// If file is empty, initialize it with the master page
+	if fileInfo.Size() == 0 {
+		fmt.Println("File is empty, initializing master page with signature...")
+		if err := MasterStore(db); err != nil {
+			return fmt.Errorf("failed to initialize master page: %w", err)
+		}
+		fmt.Println("Master page initialized successfully!")
+	}
+
+	// Resize the file if necessary
+	pagesRequired := 1 // Adjust this based on your use case
+	fmt.Println("Ensuring file size is sufficient...")
+	if err := extendFileWindows(db, pagesRequired); err != nil {
+		return fmt.Errorf("failed to extend file: %w", err)
+	}
+	fmt.Println("File size ensured.")
+
+	// Initialize memory map
+	fmt.Println("Initializing memory map...")
+	if err := ExtendMmapWindows(db, pagesRequired); err != nil {
+		return fmt.Errorf("failed to initialize mmap: %w", err)
+	}
 	fmt.Println("Memory map initialized successfully.")
 
 	// Set up BTree callbacks
@@ -225,32 +196,54 @@ func (db *KV) OpenWindows() error {
 
 	// Load the master page
 	fmt.Println("Loading master page...")
-	err = MasterLoad(db)
-	if err != nil {
+	if err := MasterLoad(db); err != nil {
 		fmt.Printf("Failed to load master page: %v\n", err)
 		goto fail
 	}
 	fmt.Println("Master page loaded successfully.")
 
-	// Done
 	fmt.Println("OpenWindows completed successfully.")
 	return nil
 
 fail:
-	// Cleanup on failure
 	fmt.Println("Error occurred, performing cleanup...")
-	db.CloseWindows()
+	// Close the file explicitly only at the end
+	if err := db.CloseWindows(); err != nil {
+		fmt.Printf("Error closing database: %v", err)
+	}
 	return fmt.Errorf("KV.OpenWindows: %w", err)
 }
 
 // CloseWindows performs cleanup of the memory-mapped regions and closes the file
-func (db *KV) CloseWindows() {
-	for _, chunk := range db.mmap.chunks {
-		// Unmap the chunk using UnmapViewOfFile
-		err := windows.UnmapViewOfFile(uintptr(unsafe.Pointer(&chunk[0])))
-		u.Assert(err == nil)
+func (db *KV) CloseWindows() error {
+	// First, try to write any pending changes
+	if err := MasterStore(db); err != nil {
+		return fmt.Errorf("failed to store final state: %w", err)
 	}
-	_ = db.fp.Close()
+
+	// Sync to ensure all changes are written to disk
+	if err := db.fp.Sync(); err != nil {
+		return fmt.Errorf("failed to sync final changes: %w", err)
+	}
+
+	// Then unmap all chunks
+	for _, chunk := range db.mmap.chunks {
+		err := windows.UnmapViewOfFile(uintptr(unsafe.Pointer(&chunk[0])))
+		if err != nil {
+			return fmt.Errorf("failed to unmap view: %w", err)
+		}
+	}
+
+	// Finally close the file
+	if db.fp != nil {
+        // Ensure the file pointer is closed properly
+        if err := db.fp.Close(); err != nil {
+            return fmt.Errorf("failed to close database file: %w", err)
+        }
+        db.fp = nil // Ensure the pointer is set to nil after closing
+    }
+    
+	return nil
 }
 
 // read the db
