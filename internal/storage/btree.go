@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	u "github.com/Ricky004/dungeonDB/internal/utils"
 )
@@ -56,6 +57,19 @@ type BIter struct {
 	tree *BTree
 	path []BNode  // from root to leaf
 	pos  []uint16 // indexes into nodes
+}
+
+// the iterator for range queries
+type Scanner struct {
+	// the range, from Key1 to Key2
+	Cmp1 int // CMP_??
+	Cmp2 int
+	Key1 Record
+	Key2 Record
+	// internal
+	tdef   *TableDef
+	iter   *BIter // the underlying B-tree iterator
+	keyEnd []byte // the encoded Key2
 }
 
 func init() {
@@ -546,4 +560,116 @@ func (tree *BTree) SeekLE(key []byte) *BIter {
 		}
 	}
 	return iter
+}
+
+// find the closest position to a key with respect to the 'cmp' relation
+func (tree *BTree) Seek(key []byte, cmp int) *BIter {
+	iter := tree.SeekLE(key)
+	if cmp != CMP_LE && iter.Valid() {
+		cur, _ := iter.Deref()
+		if !cmpOK(cur, cmp, key) {
+			// off by one
+			if cmp > 0 {
+				iter.Next()
+			} else {
+				iter.Prev()
+			}
+		}
+	}
+	return iter
+}
+
+// key cmp ref
+func cmpOK(key []byte, cmp int, ref []byte) bool {
+	r := bytes.Compare(key, ref)
+	switch cmp {
+	case CMP_GE:
+		return r >= 0
+	case CMP_GT:
+		return r > 0
+	case CMP_LT:
+		return r < 0
+	case CMP_LE:
+		return r <= 0
+	default:
+		panic("bad cmp")
+	}
+}
+
+// within the range or not?
+func (sc *Scanner) Valid() bool {
+	if !sc.iter.Valid() {
+		return false
+	}
+	key, _ := sc.iter.Deref()
+	return cmpOK(key, sc.Cmp2, sc.keyEnd)
+}
+
+// move the underlying B-tree iterator
+func (sc *Scanner) Next() {
+	u.Assert(sc.Valid())
+	if sc.Cmp1 > 0 {
+		sc.iter.Next()
+	} else {
+		sc.iter.Prev()
+	}
+}
+
+// fetch the current row
+func (sc *Scanner) Deref(rec *Record) {
+}
+
+func (db *DB) Scan(table string, req *Scanner) error {
+	tdef := getTableDef(db, table)
+	if tdef == nil {
+		return fmt.Errorf("table not found: %s", table)
+	}
+	return DbScan(db, tdef, req)
+}
+
+func DbScan(db *DB, tdef *TableDef, req *Scanner) error {
+	// sanity checks
+	switch {
+	case req.Cmp1 > 0 && req.Cmp2 < 0:
+	case req.Cmp2 > 0 && req.Cmp1 < 0:
+	default:
+		return fmt.Errorf("bad range")
+	}
+
+	val1, err := checkRecord(tdef, req.Key1, tdef.Pkeys)
+	if err != nil {
+		return err
+	}
+	val2, err := checkRecord(tdef, req.Key2, tdef.Pkeys)
+	if err != nil {
+		return err
+	}
+
+	req.tdef = tdef
+
+	// seek to the start key
+	keyStart := encodeKey(nil, tdef.Prefix, val1[:tdef.Pkeys])
+	req.keyEnd = encodeKey(nil, tdef.Prefix, val2[:tdef.Pkeys])
+	req.iter = db.kv.tree.Seek(keyStart, req.Cmp1)
+	return nil
+}
+
+// get a single row by the primary key
+func dbGet(db *DB, tdef *TableDef, rec *Record) (bool, error) {
+	// just a shortcut for the scan operation
+	sc := Scanner{
+		Cmp1: CMP_GE,
+		Cmp2: CMP_LE,
+		Key1: *rec,
+		Key2: *rec,
+	}
+	if err := DbScan(db, tdef, &sc); err != nil {
+		return false, err
+	}
+	if sc.Valid() {
+		sc.Deref(rec)
+		return true, nil
+	} else {
+		return false, nil
+	}
 }

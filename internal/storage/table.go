@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -237,7 +238,7 @@ func DbUpdate(db *DB, tdef *TableDef, rec Record, mode int) (bool, error) {
 		return false, err
 	}
 	key := encodeKey(nil, tdef.Prefix, values[:tdef.Pkeys])
-	val := encodeValues(nil, values[tdef.Pkeys:])
+	val := EncodeValues(nil, values[tdef.Pkeys:])
 	return db.kv.UpdateW(key, val, mode)
 }
 
@@ -292,13 +293,51 @@ func encodeKey(out []byte, prefix uint32, vals []Value) []byte {
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], prefix)
 	out = append(out, buf[:]...)
-	out = encodeValues(out, vals)
+	out = EncodeValues(out, vals)
 	return out
 }
 
 // for encode values to bytes
-func encodeValues(out []byte, vals []Value) []byte {
-	return nil
+// order-preserving encoding
+func EncodeValues(out []byte, vals []Value) []byte {
+	for _, v := range vals {
+		switch v.Type {
+		case TYPE_INT64:
+			var buf [8]byte
+			u := uint64(v.I64) + (1 << 63)
+			binary.BigEndian.PutUint64(buf[:], u)
+			out = append(out, buf[:]...)
+		case TYPE_BYTES:
+			out = append(out, EscapeString(v.Str)...)
+			out = append(out, 0) // null-terminated
+		default:
+			panic("bad type")
+		}
+	}
+	return out
+}
+
+// Strings are encoded as nul terminated strings,
+// escape the nul byte so that strings contain no nul byte.
+func EscapeString(in []byte) []byte {
+	zeros := bytes.Count(in, []byte{0})
+	ones := bytes.Count(in, []byte{1})
+	if zeros+ones == 0 {
+		return in
+	}
+	out := make([]byte, len(in)+zeros+ones)
+	pos := 0
+	for _, ch := range in {
+		if ch <= 1 {
+			out[pos+0] = 0x01
+			out[pos+1] = ch + 1
+			pos += 2
+		} else {
+			out[pos] = ch
+			pos += 1
+		}
+	}
+	return out
 }
 
 // for decode values from bytes
