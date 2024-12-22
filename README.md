@@ -4,10 +4,10 @@ DungeonDB is a relational database designed for who love efficient and straightf
 
 ## Features ❄️✨
 
-- **Fast Query Execution**: Optimized for speed and efficiency. (planned for future implementation)
-- **Scalable Architecture**: Handles large datasets with ease. (planned for future implementation)
-- **Flexible Schema Management**: Supports complex relational models. (planned for future implementation)
-- **Golang-Powered**: Built entirely in Golang for modern performance.
+- ⚡**Fast Query Execution**: Optimized for speed and efficiency. (planned for future implementation)
+- 📈 **Scalable Architecture**: Handles large datasets with ease. (planned for future implementation)
+- 🏗️ **Flexible Schema Management**: Supports complex relational models. (planned for future implementation)
+- ⚙️ **Golang-Powered**: Built entirely in Golang for modern performance.
 
 ## Installation 🐙
 
