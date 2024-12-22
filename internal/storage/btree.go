@@ -7,14 +7,29 @@ import (
 	u "github.com/Ricky004/dungeonDB/internal/utils"
 )
 
-type BNode struct {
-	Data []byte
-}
-
 const (
 	BNODE_NODE = 1 // internal nodes without values
 	BNODE_LEAF = 2 // leaf nodes with values
 )
+
+const (
+	HEADER             = 4    // header (4 byte) store metadata of nodes
+	BTREE_PAGE_SIZE    = 4096 // 4kb
+	BTREE_MAX_KEY_SIZE = 1000
+	BTREE_MAX_VAL_SIZE = 3000
+)
+
+const (
+	CMP_GE = +3 // >=
+	CMP_GT = +2 // >
+	CMP_LT = -2 // <
+	CMP_LE = -3 // <=
+)
+
+// BNode represents a node in the B-tree
+type BNode struct {
+	Data []byte // node data (header, pointers, key-values)
+}
 
 type BTree struct {
 	// pointer (a nonzero page number)
@@ -25,12 +40,23 @@ type BTree struct {
 	Del func(uint64)       // deallocate a page
 }
 
-const (
-	HEADER             = 4    // header (4 byte) store metadata of nodes
-	BTREE_PAGE_SIZE    = 4096 // 4kb
-	BTREE_MAX_KEY_SIZE = 1000
-	BTREE_MAX_VAL_SIZE = 3000
-)
+// InsertReq is a struct for the insert request to the B-tree
+type InsertReq struct {
+	tree *BTree
+	// out
+	Added bool // added a new key
+	// in
+	Key  []byte
+	Val  []byte
+	Mode int
+}
+
+// B-tree iterator (for range scans)
+type BIter struct {
+	tree *BTree
+	path []BNode  // from root to leaf
+	pos  []uint16 // indexes into nodes
+}
 
 func init() {
 	// 8 = space reserved for a pointer or page number
@@ -459,4 +485,65 @@ func (tree *BTree) Insert(key []byte, val []byte) {
 	}
 }
 
+func (tree *BTree) InsertEx(req *InsertReq) {
+	// code
+}
 
+// get the current KV pair
+func (iter *BIter) Deref() ([]byte, []byte) {
+	node := iter.path[len(iter.path)-1]
+	idx := iter.pos[len(iter.pos)-1]
+	return node.GetKey(idx), node.GetVal(idx)
+}
+
+// precondition of the Deref()
+func (iter *BIter) Valid() bool {
+	return len(iter.path) > 0
+}
+
+// moving backward and forward
+func (iter *BIter) Prev() {
+	iterPrev(iter, len(iter.path)-1)
+}
+
+func (iter *BIter) Next() {
+	iterNext(iter, len(iter.path)+1)
+}
+
+func iterPrev(iter *BIter, level int) {
+	if iter.pos[level] > 0 {
+		iter.pos[level]-- // move within this node
+	} else if level > 0 {
+		iterPrev(iter, level-1) // move to a slibing node
+	} else {
+		return // dummy key
+	}
+	if level+1 < len(iter.pos) {
+		// update the kid node
+		node := iter.path[level]
+		kid := iter.tree.Get(node.GetPtr(iter.pos[level]))
+		iter.path[level+1] = kid
+		iter.pos[level+1] = kid.Nkeys() - 1
+	}
+}
+
+func iterNext(iter *BIter, level int) {
+	// code
+}
+
+// find the closest position that is less or equal to the input key
+func (tree *BTree) SeekLE(key []byte) *BIter {
+	iter := &BIter{tree: tree}
+	for ptr := tree.root; ptr != 0; {
+		node := tree.Get(ptr)
+		idx := NodeLookupLE(node, key)
+		iter.path = append(iter.path, node)
+		iter.pos = append(iter.pos, idx)
+		if node.Btype() == BNODE_NODE {
+			ptr = node.GetPtr(idx)
+		} else {
+			ptr = 0
+		}
+	}
+	return iter
+}

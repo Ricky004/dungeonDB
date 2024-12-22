@@ -261,6 +261,11 @@ func (db *KV) DelW(key []byte) (bool, error) {
 	return deleted, FlushPagesW(db)
 }
 
+func (db *KV) UpdateW(key []byte, val []byte, mode int) (bool, error) {
+	// code
+	return false, nil
+}
+
 // persist the newly allocated pages after updates
 func FlushPagesW(db *KV) error {
 	if err := WritePagesW(db); err != nil {
