@@ -49,12 +49,14 @@ type DB struct {
 // table definition
 type TableDef struct {
 	// user defined
-	Name  string   // table name
-	Types []uint32 // column types
-	Cols  []string // column names
-	Pkeys int      // the first pkeys columns are primary keys
+	Name    string     // table name
+	Types   []uint32   // column types
+	Cols    []string   // column names
+	Pkeys   int        // the first pkeys columns are primary keys
+	Indexes [][]string // secondary indexes
 	// auto-assigned B-tree key prefixes for different tables
-	Prefix uint32
+	Prefix        uint32
+	IndexPrefixes []uint32
 }
 
 // internal table: metadata
@@ -168,6 +170,7 @@ func (db *DB) TableNew(tdef *TableDef) error {
 
 // check the table definition
 func tableDefCheck(tdef *TableDef) error {
+	// verify the table definition
 	if tdef.Name == "" {
 		return fmt.Errorf("table name is empty")
 	}
@@ -176,6 +179,14 @@ func tableDefCheck(tdef *TableDef) error {
 	}
 	if len(tdef.Types) != len(tdef.Cols) {
 		return fmt.Errorf("number of types does not match number of columns")
+	}
+	// verify the indexes
+	for i, index := range tdef.Indexes {
+		index, err := CheckIndexKeys(tdef, index)
+		if err != nil {
+			return err
+		}
+		tdef.Indexes[i] = index
 	}
 	return nil
 }
@@ -343,4 +354,32 @@ func EscapeString(in []byte) []byte {
 // for decode values from bytes
 func decodeValues(in []byte, out []Value) {
 
+}
+
+func CheckIndexKeys(tdef *TableDef, index []string) ([]string, error) {
+	icols := map[string]bool{}
+	for _, c := range index {
+		// check the index columns
+		if _, ok := icols[c]; ok {
+			return nil, fmt.Errorf("duplicate index column: %s", c)
+		}
+		icols[c] = true
+	}
+	// add the primary key to the index
+	for _, c := range tdef.Cols[:tdef.Pkeys] {
+		if !icols[c] {
+			index = append(index, c)
+		}
+	}
+	u.Assert(len(index) < len(tdef.Cols))
+	return index, nil
+}
+
+func colIndex(tdef *TableDef, col string) int {
+	for i, c := range tdef.Cols {
+		if c == col {
+			return i
+		}
+	}
+	return -1
 }
