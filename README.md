@@ -14,3 +14,7 @@ DungeonDB is a relational database designed for who love efficient and straightf
 1. Clone the repository:
    ```bash
    git clone https://github.com/Ricky004/DungeonDB.git
+
+## Reference 📚
+
+I referenced the book Database Internals by Alex Petrov as a valuable resource while building this project from scratch.
