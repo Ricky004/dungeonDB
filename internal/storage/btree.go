@@ -694,7 +694,7 @@ func dbGet(db *DB, tdef *TableDef, rec *Record) (bool, error) {
 }
 
 // maintain the indexes after a record is inserted or deleted
-func indexOP(db *DB, tdef *TableDef, rec *Record, op int) {
+func indexOP(db *DB, tdef *TableDef, rec Record, op int) {
     key := make([]byte, 0, 256)
 	irec := make([]Value, len(tdef.Cols))
 	for i, index := range tdef.Indexes {

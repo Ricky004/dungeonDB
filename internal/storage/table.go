@@ -258,15 +258,27 @@ func DbUpdate(db *DB, tdef *TableDef, rec Record, mode int) (bool, error) {
 	}
 	key := encodeKey(nil, tdef.Prefix, values[:tdef.Pkeys])
 	val := EncodeValues(nil, values[tdef.Pkeys:])
-	req := &InsertReq{
+	req := InsertReq{
 		Key:  key,
 		Val:  val,
 		Mode: mode,
 	}
 
-	// Call the B-tree update function
-	success, err := db.kv.UpdateW(req)
-	return success, err
+	// Call the B-tree update function and check if the record was added
+	added, err := db.kv.UpdateW(&req)
+	if err != nil || !req.Updated || len(tdef.Indexes) == 0 {
+	return added, err
+	}
+
+	// maintain the indexes
+    if req.Updated && !req.Added {
+		decodeValues(req.Old, values[tdef.Pkeys:]) // decode the old values
+		indexOP(db, tdef, Record{tdef.Cols, values}, INDEX_DEL)
+	}
+	if req.Updated {
+		indexOP(db, tdef, rec, INDEX_ADD)
+	}
+	return added, nil
 }
 
 // delete a record by its primary key
@@ -276,12 +288,20 @@ func DbDelete(db *DB, tdef *TableDef, rec Record) (bool, error) {
 		return false, err
 	}
 	key := encodeKey(nil, tdef.Prefix, values[:tdef.Pkeys])
-	req := &DeleteReq{
+	req := DeleteReq{
 		Key: key,
 	}
 	// Call the B-tree delete function
-	success, err := db.kv.DelW(req)
-	return success, err
+	deleted, err := db.kv.DelW(&req)
+	if err != nil || !deleted || len(tdef.Indexes) == 0 {
+	return deleted, err
+	}
+	
+	// maintain the indexes
+	if deleted {
+		indexOP(db, tdef, rec, INDEX_DEL)
+	}
+	return true, nil
 }
 
 // indexOf returns the index of the first occurrence of str in slice, or -1 if not present.
