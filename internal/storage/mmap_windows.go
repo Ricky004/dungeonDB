@@ -256,12 +256,12 @@ func (db *KV) SetW(key []byte, val []byte) error {
 	db.tree.Insert(key, val)
 	return FlushPagesW(db)
 }
-func (db *KV) DelW(key []byte) (bool, error) {
-	deleted := db.tree.Delete(key)
+func (db *KV) DelW(req *DeleteReq) (bool, error) {
+	deleted := db.tree.Delete(req.Key)
 	return deleted, FlushPagesW(db)
 }
 
-func (db *KV) UpdateW(key []byte, val []byte, mode int) (bool, error) {
+func (db *KV) UpdateW(req *InsertReq) (bool, error) {
 	// code
 	return false, nil
 }

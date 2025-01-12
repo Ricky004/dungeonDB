@@ -142,6 +142,7 @@ func (db *DB) TableNew(tdef *TableDef) error {
 	if ok {
 		return fmt.Errorf("table exists: %s", tdef.Name)
 	}
+
 	// allocate a new prefix
 	u.Assert(tdef.Prefix == 0)
 	tdef.Prefix = TABLE_PREFIX_MIN
@@ -154,12 +155,19 @@ func (db *DB) TableNew(tdef *TableDef) error {
 	} else {
 		meta.AddStr("val", make([]byte, 4))
 	}
+	for i := range tdef.Indexes {
+		prefix := tdef.Prefix + 1 + uint32(i)
+		tdef.IndexPrefixes = append(tdef.IndexPrefixes, prefix)
+	}
+
 	// update the next prefix
-	binary.LittleEndian.PutUint32(meta.Get("val").Str, tdef.Prefix+1)
+	ntree := 1 + uint32(len(tdef.Indexes))
+	binary.LittleEndian.PutUint32(meta.Get("val").Str, tdef.Prefix+ntree)
 	_, err = DbUpdate(db, TDEF_META, *meta, 0)
 	if err != nil {
 		return err
 	}
+
 	// store the definition
 	val, err := json.Marshal(tdef)
 	u.Assert(err == nil)
@@ -250,7 +258,15 @@ func DbUpdate(db *DB, tdef *TableDef, rec Record, mode int) (bool, error) {
 	}
 	key := encodeKey(nil, tdef.Prefix, values[:tdef.Pkeys])
 	val := EncodeValues(nil, values[tdef.Pkeys:])
-	return db.kv.UpdateW(key, val, mode)
+	req := &InsertReq{
+		Key:  key,
+		Val:  val,
+		Mode: mode,
+	}
+
+	// Call the B-tree update function
+	success, err := db.kv.UpdateW(req)
+	return success, err
 }
 
 // delete a record by its primary key
@@ -260,7 +276,12 @@ func DbDelete(db *DB, tdef *TableDef, rec Record) (bool, error) {
 		return false, err
 	}
 	key := encodeKey(nil, tdef.Prefix, values[:tdef.Pkeys])
-	return db.kv.DelW(key)
+	req := &DeleteReq{
+		Key: key,
+	}
+	// Call the B-tree delete function
+	success, err := db.kv.DelW(req)
+	return success, err
 }
 
 // indexOf returns the index of the first occurrence of str in slice, or -1 if not present.

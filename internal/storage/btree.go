@@ -27,6 +27,11 @@ const (
 	CMP_LE = -3 // <=
 )
 
+const (
+	INDEX_ADD = 1 
+	INDEX_DEL = 2
+)
+
 // BNode represents a node in the B-tree
 type BNode struct {
 	Data []byte // node data (header, pointers, key-values)
@@ -45,11 +50,21 @@ type BTree struct {
 type InsertReq struct {
 	tree *BTree
 	// out
-	Added bool // added a new key
+	Added   bool   // added a new key
+	Updated bool   // updated an existing key
+	Old     []byte // the old value
 	// in
 	Key  []byte
 	Val  []byte
 	Mode int
+}
+
+type DeleteReq struct {
+	tree *BTree
+	// in
+	Key []byte
+	// out
+    Old []byte
 }
 
 // B-tree iterator (for range scans)
@@ -503,6 +518,10 @@ func (tree *BTree) InsertEx(req *InsertReq) {
 	// code
 }
 
+func (tree *BTree) DeleteEx(req *DeleteReq) {
+	// code
+}
+
 // get the current KV pair
 func (iter *BIter) Deref() ([]byte, []byte) {
 	node := iter.path[len(iter.path)-1]
@@ -672,4 +691,29 @@ func dbGet(db *DB, tdef *TableDef, rec *Record) (bool, error) {
 	} else {
 		return false, nil
 	}
+}
+
+// maintain the indexes after a record is inserted or deleted
+func indexOP(db *DB, tdef *TableDef, rec *Record, op int) {
+    key := make([]byte, 0, 256)
+	irec := make([]Value, len(tdef.Cols))
+	for i, index := range tdef.Indexes {
+		// the indexed key
+		for j, c := range index {
+			irec[j] = *rec.Get(c)
+		}
+		// update the KV store
+		key = encodeKey(key[:0], tdef.IndexPrefixes[i], irec[:len(index)])
+		done, err := false, error(nil)
+		switch op {
+		case INDEX_ADD:
+			done, err = db.kv.UpdateW(&InsertReq{Key: key})
+		case INDEX_DEL:
+			done, err = db.kv.DelW(&DeleteReq{Key: key})
+        default:
+			panic("bad op")
+		}
+		u.Assert(err == nil, "indexOP: %v") 
+		u.Assert(done, "indexOP: %v")
+	} 
 }
