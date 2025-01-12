@@ -424,3 +424,40 @@ func colIndex(tdef *TableDef, col string) int {
 	}
 	return -1
 }
+
+func findIndex(tdef *TableDef, keys []string) (int, error) {
+	pk := tdef.Cols[:tdef.Pkeys]
+	if isPrefix(pk, keys) {
+		// use the primary key
+		// also works for full table scans without a key.
+		return -1, nil
+	}
+
+	// find a suitable index
+	winner := -2
+	for i, index := range tdef.Indexes {
+		if !isPrefix(index, keys) {
+			continue
+		}
+		if winner == -2 || len(index) < len(tdef.Indexes[winner]) {
+			winner = i
+		}
+		if winner == -2 {
+			return -2, fmt.Errorf("no index found")
+		}
+	}
+
+    return winner, nil
+}
+
+func isPrefix(long, short []string) bool {
+	if len(long) < len(short){
+		return false
+	}
+	for i, c := range short {
+		if long[i] != c {
+			return false
+		}
+	}
+	return true
+}
