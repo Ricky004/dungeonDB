@@ -28,7 +28,7 @@ const (
 )
 
 const (
-	INDEX_ADD = 1 
+	INDEX_ADD = 1
 	INDEX_DEL = 2
 )
 
@@ -64,7 +64,7 @@ type DeleteReq struct {
 	// in
 	Key []byte
 	// out
-    Old []byte
+	Old []byte
 }
 
 // B-tree iterator (for range scans)
@@ -82,9 +82,11 @@ type Scanner struct {
 	Key1 Record
 	Key2 Record
 	// internal
-	tdef   *TableDef
-	iter   *BIter // the underlying B-tree iterator
-	keyEnd []byte // the encoded Key2
+	db      *DB
+	tdef    *TableDef
+	indexNo int    // -1: use the primary key; >= 0: use an index
+	iter    *BIter // the underlying B-tree iterator
+	keyEnd  []byte // the encoded Key2
 }
 
 func init() {
@@ -96,7 +98,6 @@ func init() {
 }
 
 //	helper functions
-//
 // header
 func (node BNode) Btype() uint16 {
 	return binary.LittleEndian.Uint16(node.Data)
@@ -695,7 +696,7 @@ func dbGet(db *DB, tdef *TableDef, rec *Record) (bool, error) {
 
 // maintain the indexes after a record is inserted or deleted
 func indexOP(db *DB, tdef *TableDef, rec Record, op int) {
-    key := make([]byte, 0, 256)
+	key := make([]byte, 0, 256)
 	irec := make([]Value, len(tdef.Cols))
 	for i, index := range tdef.Indexes {
 		// the indexed key
@@ -710,10 +711,10 @@ func indexOP(db *DB, tdef *TableDef, rec Record, op int) {
 			done, err = db.kv.UpdateW(&InsertReq{Key: key})
 		case INDEX_DEL:
 			done, err = db.kv.DelW(&DeleteReq{Key: key})
-        default:
+		default:
 			panic("bad op")
 		}
-		u.Assert(err == nil, "indexOP: %v") 
+		u.Assert(err == nil, "indexOP: %v")
 		u.Assert(done, "indexOP: %v")
-	} 
+	}
 }

@@ -267,11 +267,11 @@ func DbUpdate(db *DB, tdef *TableDef, rec Record, mode int) (bool, error) {
 	// Call the B-tree update function and check if the record was added
 	added, err := db.kv.UpdateW(&req)
 	if err != nil || !req.Updated || len(tdef.Indexes) == 0 {
-	return added, err
+		return added, err
 	}
 
 	// maintain the indexes
-    if req.Updated && !req.Added {
+	if req.Updated && !req.Added {
 		decodeValues(req.Old, values[tdef.Pkeys:]) // decode the old values
 		indexOP(db, tdef, Record{tdef.Cols, values}, INDEX_DEL)
 	}
@@ -294,9 +294,9 @@ func DbDelete(db *DB, tdef *TableDef, rec Record) (bool, error) {
 	// Call the B-tree delete function
 	deleted, err := db.kv.DelW(&req)
 	if err != nil || !deleted || len(tdef.Indexes) == 0 {
-	return deleted, err
+		return deleted, err
 	}
-	
+
 	// maintain the indexes
 	if deleted {
 		indexOP(db, tdef, rec, INDEX_DEL)
@@ -369,16 +369,26 @@ func EncodeValues(out []byte, vals []Value) []byte {
 	return out
 }
 
-// Strings are encoded as nul terminated strings,
-// escape the nul byte so that strings contain no nul byte.
+// 1. strings are encoded as null-terminated strings,
+// escape the null byte so that strings contain no null byte.
+// 2. "\xff" represents the highest order in key comparisons,
+// also escape the first byte if it's 0xff.
 func EscapeString(in []byte) []byte {
 	zeros := bytes.Count(in, []byte{0})
 	ones := bytes.Count(in, []byte{1})
 	if zeros+ones == 0 {
 		return in
 	}
+
 	out := make([]byte, len(in)+zeros+ones)
 	pos := 0
+	if len(in) > 0 && in[0] >= 0xfe {
+       out[0] = 0xfe
+	   out[1] = in[0]
+	   pos += 2
+	   in = in[1:]     
+	}
+
 	for _, ch := range in {
 		if ch <= 1 {
 			out[pos+0] = 0x01
@@ -447,11 +457,11 @@ func findIndex(tdef *TableDef, keys []string) (int, error) {
 		}
 	}
 
-    return winner, nil
+	return winner, nil
 }
 
 func isPrefix(long, short []string) bool {
-	if len(long) < len(short){
+	if len(long) < len(short) {
 		return false
 	}
 	for i, c := range short {
@@ -461,3 +471,33 @@ func isPrefix(long, short []string) bool {
 	}
 	return true
 }
+
+// The range key can be a prefix of the index key,
+// we may have to encode missing columns to make the comparison work.
+func encodeKeyPartial(
+	out []byte, prefix uint32, values []Value,
+	tdef *TableDef, keys []string, cmp int,
+) []byte {
+	out = encodeKey(out, prefix, values)
+	// Encode the missing columns as either minimum or maximum values,
+	// depending on the comparison operator.
+	// 1. The empty string is lower than all possible value encodings,
+	// thus we don't need to add anything for CMP_LT and CMP_GE.
+	// 2. The maximum encodings are all 0xff bytes.
+	max := cmp == CMP_GT || cmp == CMP_LE
+loop:
+   for i := len(values); max && i < len(keys); i++ {
+	switch tdef.Types[colIndex(tdef, keys[i])] {
+	case TYPE_BYTES:
+		out = append(out, 0xff)
+		break loop // stops here since no string encoding starts with 0xff
+	case TYPE_INT64:
+		out = append(out, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)
+	default:
+		fmt.Errorf("what?")
+	}
+   }
+   return out
+}
+
+
